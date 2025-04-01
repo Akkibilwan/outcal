@@ -88,15 +88,21 @@ def fetch_video_batch(video_ids):
         url = f"https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet,contentDetails&id={ids}&key={yt_api_key}"
         res = requests.get(url).json()
         for item in res.get('items', []):
-            vid = item['id']
-            duration = parse_duration(item['contentDetails']['duration'])
-            published = item['snippet']['publishedAt']
-            video_data[vid] = {
-                'viewCount': int(item['statistics'].get('viewCount', 0)),
-                'duration': duration,
-                'publishedAt': published,
-                'isShort': duration <= 60
-            }
+            try:
+                vid = item['id']
+                if 'contentDetails' not in item or 'duration' not in item['contentDetails']:
+                    continue
+                duration = parse_duration(item['contentDetails']['duration'])
+                published = item['snippet']['publishedAt']
+                video_data[vid] = {
+                    'viewCount': int(item['statistics'].get('viewCount', 0)),
+                    'duration': duration,
+                    'publishedAt': published,
+                    'isShort': duration <= 60
+                }
+            except Exception as e:
+                print(f"Skipping video {item.get('id', 'unknown')}: {e}")
+                continue
     return video_data
 
 def calculate_outlier_score(current_views, channel_avg):
