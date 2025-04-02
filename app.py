@@ -1,6 +1,3 @@
-Below is the complete updated code that you can copy and paste directly:
-
-```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -248,6 +245,7 @@ def generate_historical_data(video_details, max_days, is_short=None):
     today = datetime.datetime.now().date()
     all_video_data = []
     for video_id, details in video_details.items():
+        # Filter by short or long-form if needed
         if is_short is not None and details['isShort'] != is_short:
             continue
         try:
@@ -255,28 +253,39 @@ def generate_historical_data(video_details, max_days, is_short=None):
             video_age_days = (today - publish_date).days
         except:
             continue
+        
+        # Skip very new videos
         if video_age_days < 3:
             continue
-        days_to_generate = video_age_days if max_days > video_age_days else max_days
+        
+        days_to_generate = min(video_age_days, max_days)
         total_views = details['viewCount']
+        
+        # Generate synthetic daily data for each video
         video_data = generate_view_trajectory(video_id, days_to_generate, total_views, details['isShort'])
         all_video_data.extend(video_data)
+    
     if not all_video_data:
         return pd.DataFrame()
+    
     return pd.DataFrame(all_video_data)
 
 def generate_view_trajectory(video_id, days, total_views, is_short):
     """Generate view trajectory based on video type"""
     data = []
+    
+    # Different growth patterns for Shorts vs Long-form
     if is_short:
         trajectory = [total_views * (1 - np.exp(-5 * ((i+1)/days)**1.5)) for i in range(days)]
     else:
         k = 10
         trajectory = [total_views * (1 / (1 + np.exp(-k * ((i+1)/days - 0.35)))) for i in range(days)]
     
+    # Scale so final point ~ actual total views
     scaling_factor = total_views / trajectory[-1] if trajectory[-1] > 0 else 1
     trajectory = [v * scaling_factor for v in trajectory]
     
+    # Add some noise
     noise_factor = 0.05
     for i in range(days):
         noise = np.random.normal(0, noise_factor * total_views)
@@ -286,10 +295,12 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
             noisy_value = max(trajectory[i-1] + 10, trajectory[i] + noise)
         trajectory[i] = noisy_value
     
+    # Convert cumulative to daily
     daily_views = [trajectory[0]]
     for i in range(1, days):
         daily_views.append(trajectory[i] - trajectory[i-1])
     
+    # Build final records
     for day in range(days):
         data.append({
             'videoId': video_id,
@@ -297,62 +308,78 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
             'daily_views': int(daily_views[day]),
             'cumulative_views': int(trajectory[day])
         })
+    
     return data
 
 def calculate_benchmark(df, band_percentage):
-    """Calculate benchmark statistics based on historical data"""
-    lower_q = (100 - band_percentage) / 200
-    upper_q = 1 - (100 - band_percentage) / 200
+    """Calculate lower_band, upper_band, and channel_average from historical data"""
+    lower_q = (100 - band_percentage) / 200   # e.g., if 50% => 25th percentile
+    upper_q = 1 - (100 - band_percentage) / 200  # e.g., if 50% => 75th percentile
+    
     summary = df.groupby('day')['cumulative_views'].agg([
         ('lower_band', lambda x: x.quantile(lower_q)),
         ('upper_band', lambda x: x.quantile(upper_q)),
         ('count', 'count')
     ]).reset_index()
+    
+    # "channel_average" is the midpoint of the two quantiles
     summary['channel_average'] = (summary['lower_band'] + summary['upper_band']) / 2
+    
     return summary
 
 def calculate_outlier_score(current_views, channel_average):
-    """Calculate outlier score as the ratio of current views to channel average"""
+    """Outlier score = ratio of current views to channel average at same day"""
     if channel_average <= 0:
         return 0
     return current_views / channel_average
 
 def create_performance_chart(benchmark_data, video_data, video_title):
-    """Create a performance comparison chart"""
+    """Create a performance comparison chart with explicit lower and upper bands"""
     fig = go.Figure()
-    # Add upper band trace
+    
+    # 1. Upper Band
     fig.add_trace(go.Scatter(
-        x=benchmark_data['day'], 
+        x=benchmark_data['day'],
         y=benchmark_data['upper_band'],
         name='Upper Band',
+        mode='lines',
         line=dict(color='rgba(173, 216, 230, 0.6)', width=1),
-        mode='lines'
+        hovertemplate='Day: %{x}<br>Upper Band: %{y:,.0f}'
     ))
-    # Add lower band trace and fill the area between lower and upper bands
+    
+    # 2. Lower Band (filled area between upper and lower)
     fig.add_trace(go.Scatter(
-        x=benchmark_data['day'], 
+        x=benchmark_data['day'],
         y=benchmark_data['lower_band'],
         name='Lower Band',
         fill='tonexty',
         fillcolor='rgba(173, 216, 230, 0.3)',
+        mode='lines',
         line=dict(color='rgba(173, 216, 230, 0.6)', width=1),
-        mode='lines'
+        hovertemplate='Day: %{x}<br>Lower Band: %{y:,.0f}'
     ))
+    
+    # 3. Channel Average
     fig.add_trace(go.Scatter(
-        x=benchmark_data['day'], 
+        x=benchmark_data['day'],
         y=benchmark_data['channel_average'],
         name='Channel Average',
         line=dict(color='#4285f4', width=2, dash='dash'),
-        mode='lines'
+        mode='lines',
+        hovertemplate='Day: %{x}<br>Channel Average: %{y:,.0f}'
     ))
+    
+    # 4. Actual Data (the video we're analyzing)
     actual_data = video_data[video_data['projected'] == False]
     fig.add_trace(go.Scatter(
-        x=actual_data['day'], 
+        x=actual_data['day'],
         y=actual_data['cumulative_views'],
         name=f'"{video_title}" (Actual)',
         line=dict(color='#ea4335', width=3),
-        mode='lines'
+        mode='lines+markers',
+        hovertemplate='Day: %{x}<br>Actual Views: %{y:,.0f}'
     ))
+    
     fig.update_layout(
         title='Video Performance Comparison',
         xaxis_title='Days Since Upload',
@@ -371,7 +398,10 @@ def create_performance_chart(benchmark_data, video_data, video_title):
     return fig
 
 def simulate_video_performance(video_data, benchmark_data):
-    """Simulate video performance based on its actual views using channel average"""
+    """
+    Simulate the day-by-day performance of the current video based on 
+    how it compares to channel_average at each day.
+    """
     try:
         published_at = datetime.datetime.fromisoformat(video_data['publishedAt'].replace('Z', '+00:00')).date()
         current_date = datetime.datetime.now().date()
@@ -389,16 +419,25 @@ def simulate_video_performance(video_data, benchmark_data):
     for day in range(days_since_publish + 1):
         if day >= len(benchmark_data):
             break
+        
         if day == days_since_publish:
+            # Actual final day => actual total views
             cumulative_views = current_views
         else:
-            ratio = benchmark_data.loc[day, 'channel_average'] / benchmark_data.loc[benchmark_day_index, 'channel_average'] if benchmark_data.loc[benchmark_day_index, 'channel_average'] > 0 else 0
+            # Scale to channel average ratio
+            if benchmark_data.loc[benchmark_day_index, 'channel_average'] > 0:
+                ratio = (benchmark_data.loc[day, 'channel_average'] /
+                         benchmark_data.loc[benchmark_day_index, 'channel_average'])
+            else:
+                ratio = 0
             cumulative_views = int(current_views * ratio)
+        
         if day == 0:
             daily_views = cumulative_views
         else:
             prev_cumulative = data[-1]['cumulative_views']
             daily_views = max(0, cumulative_views - prev_cumulative)
+        
         data.append({
             'day': day,
             'daily_views': daily_views,
@@ -445,11 +484,14 @@ with st.sidebar:
         max_value=100,
         value=50,
         step=5,
-        help="Middle percentage range for typical performance (e.g., 50 = 25th to 75th percentile)"
+        help="Middle percentage range for typical performance (e.g., 50 => 25th to 75th percentile)"
     )
 
 st.subheader("Enter YouTube Video URL")
-video_url = st.text_input("Video URL:", placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID or https://www.youtube.com/shorts/VideoID")
+video_url = st.text_input(
+    "Video URL:", 
+    placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID or https://www.youtube.com/shorts/VideoID"
+)
 
 if st.button("Analyze Video", type="primary") and video_url:
     
@@ -463,8 +505,11 @@ if st.button("Analyze Video", type="primary") and video_url:
         if not video_details:
             st.error("Failed to fetch video details. Please check the video URL.")
             st.stop()
+        
         channel_id = video_details['channelId']
-        published_date = datetime.datetime.fromisoformat(video_details['publishedAt'].replace('Z', '+00:00')).date()
+        published_date = datetime.datetime.fromisoformat(
+            video_details['publishedAt'].replace('Z', '+00:00')
+        ).date()
         video_age = (datetime.datetime.now().date() - published_date).days
     
     with st.spinner("Fetching channel videos for benchmark..."):
@@ -473,6 +518,7 @@ if st.button("Analyze Video", type="primary") and video_url:
             st.error("Failed to fetch channel videos.")
             st.stop()
     
+    # Display basic video info
     st.subheader("Video Information")
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -482,10 +528,13 @@ if st.button("Analyze Video", type="primary") and video_url:
         st.markdown(f"**Title:** {video_details['title']}")
         st.markdown(f"**Channel:** {channel_name}")
         st.markdown(f"**Published:** {published_date} ({video_age} days ago)")
+        
+        # Convert duration to HH:MM:SS
         minutes, seconds = divmod(video_details['duration'], 60)
         hours, minutes = divmod(minutes, 60)
         duration_str = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
         st.markdown(f"**Duration:** {duration_str} ({'Short' if video_details['isShort'] else 'Long-form'})")
+        
         metric_cols = st.columns(3)
         with metric_cols[0]:
             st.metric("Views", f"{video_details['viewCount']:,}")
@@ -495,6 +544,7 @@ if st.button("Analyze Video", type="primary") and video_url:
             st.metric("Comments", f"{video_details['commentCount']:,}")
     
     with st.spinner("Calculating benchmark and outlier score..."):
+        # Determine whether to filter by short/long/all
         if video_type == "auto":
             is_short_filter = video_details['isShort']
             video_type_str = "Shorts" if is_short_filter else "Long-form Videos"
@@ -508,13 +558,19 @@ if st.button("Analyze Video", type="primary") and video_url:
             is_short_filter = None
             video_type_str = "All Videos"
         
+        # Fetch details for the channel's videos
         video_ids = [v['videoId'] for v in channel_videos]
         detailed_videos = fetch_video_details(video_ids, yt_api_key)
+        
+        # Exclude the current video from its own benchmark
         if video_id in detailed_videos:
             del detailed_videos[video_id]
         
+        # Count how many are shorts vs. long-form
         shorts_count = sum(1 for _, details in detailed_videos.items() if details['isShort'])
         longform_count = len(detailed_videos) - shorts_count
+        
+        # If user requested only shorts/long-form but there's not enough data, fallback to all
         if is_short_filter is True and shorts_count < 5:
             st.warning(f"Not enough Shorts in this channel (found {shorts_count}). Using all videos instead.")
             is_short_filter = None
@@ -524,29 +580,40 @@ if st.button("Analyze Video", type="primary") and video_url:
             is_short_filter = None
             video_type_str = "All Videos"
         
-        st.info(f"Building benchmark from {len(detailed_videos)} videos: {shorts_count} shorts and {longform_count} long-form videos")
+        st.info(f"Building benchmark from {len(detailed_videos)} videos: {shorts_count} Shorts, {longform_count} Long-form")
         
-        # Limit simulation to the current age of the video
+        # Generate historical data up to the age of the current video
         max_days = video_age
         benchmark_df = generate_historical_data(detailed_videos, max_days, is_short_filter)
         if benchmark_df.empty:
             st.error("Not enough data to create a benchmark. Try including more videos or changing the video type filter.")
             st.stop()
         
+        # Calculate lower/upper bands and channel average
         benchmark_stats = calculate_benchmark(benchmark_df, percentile_range)
+        
+        # Simulate the current video's day-by-day performance
         video_performance = simulate_video_performance(video_details, benchmark_stats)
+        
+        # Get the outlier score
         day_index = min(video_age, len(benchmark_stats) - 1)
         if day_index < 0:
             day_index = 0
+        
         benchmark_lower = benchmark_stats.loc[day_index, 'lower_band']
         benchmark_upper = benchmark_stats.loc[day_index, 'upper_band']
         channel_average = benchmark_stats.loc[day_index, 'channel_average']
         outlier_score = calculate_outlier_score(video_details['viewCount'], channel_average)
         
-        fig = create_performance_chart(benchmark_stats, video_performance, 
-                                      video_details['title'][:40] + "..." if len(video_details['title']) > 40 else video_details['title'])
+        # Plot the chart
+        fig = create_performance_chart(
+            benchmark_stats,
+            video_performance,
+            video_details['title'][:40] + "..." if len(video_details['title']) > 40 else video_details['title']
+        )
         st.plotly_chart(fig, use_container_width=True)
         
+        # Outlier Analysis
         st.subheader("Outlier Analysis")
         if outlier_score >= 2.0:
             outlier_category = "Significant Positive Outlier"
@@ -567,6 +634,7 @@ if st.button("Analyze Video", type="primary") and video_url:
             outlier_category = "Significant Negative Outlier"
             outlier_class = "outlier-low"
         
+        # Display Key Metrics
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown(f"""
@@ -591,13 +659,14 @@ if st.button("Analyze Video", type="primary") and video_url:
             </div>
             """, unsafe_allow_html=True)
         
+        # Detailed Performance Comparison
         st.subheader("Detailed Performance Metrics")
-        col1, col2 = st.columns(2)
-        with col1:
+        col_a, col_b = st.columns(2)
+        with col_a:
             if channel_average > 0:
                 vs_avg_pct = ((video_details['viewCount'] / channel_average) - 1) * 100
                 st.metric("Compared to Channel Average", f"{vs_avg_pct:+.1f}%")
-        with col2:
+        with col_b:
             if benchmark_upper > 0:
                 vs_upper_pct = ((video_details['viewCount'] / benchmark_upper) - 1) * 100
                 st.metric("Compared to Upper Band", f"{vs_upper_pct:+.1f}%")
@@ -616,6 +685,3 @@ if st.button("Analyze Video", type="primary") and video_url:
             </ul>
         </div>
         """, unsafe_allow_html=True)
-``` 
-
-This version removes mean and median calculations and displays both the lower and upper band views in the performance chart as requested.
