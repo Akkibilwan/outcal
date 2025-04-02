@@ -16,7 +16,7 @@ else:
 
 # Page configuration
 st.set_page_config(
-    page_title="YouTube Video Outlier & Subscriber Analysis",
+    page_title="YouTube Video Outlier Analysis",
     page_icon="📊",
     layout="wide"
 )
@@ -59,8 +59,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main title
-st.markdown("<div class='main-header'>YouTube Video Outlier & Subscriber Analysis</div>", unsafe_allow_html=True)
-st.markdown("Analyze a video to see its views performance relative to the channel as well as the subscribers gained from that video.")
+st.markdown("<div class='main-header'>YouTube Video Outlier Analysis</div>", unsafe_allow_html=True)
+st.markdown("Find out if your video is an outlier compared to the channel's average performance")
 
 # ------------------------
 # URL Parsing Functions
@@ -85,13 +85,12 @@ def extract_channel_id(url):
     return None
 
 def extract_video_id(url):
-    """Extract video ID from various YouTube URL formats, including Shorts"""
+    """Extract video ID from various YouTube URL formats"""
     patterns = [
         r'youtube\.com/watch\?v=([^&\s]+)',
         r'youtu\.be/([^?\s]+)',
         r'youtube\.com/embed/([^?\s]+)',
-        r'youtube\.com/v/([^?\s]+)',
-        r'youtube\.com/shorts/([^?\s]+)'
+        r'youtube\.com/v/([^?\s]+)'
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
@@ -159,7 +158,7 @@ def fetch_single_video(video_id, api_key):
         return None
 
 def fetch_channel_videos(channel_id, max_videos, api_key):
-    """Fetch videos from a channel and channel statistics"""
+    """Fetch videos from a channel"""
     playlist_url = f"https://www.googleapis.com/youtube/v3/channels?part=contentDetails,snippet,statistics&id={channel_id}&key={api_key}"
     try:
         playlist_res = requests.get(playlist_url).json()
@@ -238,7 +237,7 @@ def parse_duration(duration_str):
     return total_seconds
 
 # ------------------------
-# Benchmark & Simulation Functions (Views)
+# Benchmark & Simulation Functions
 # ------------------------
 def generate_historical_data(video_details, max_days, is_short=None):
     """Generate historical view data for benchmark videos"""
@@ -317,7 +316,7 @@ def calculate_outlier_score(current_views, channel_average):
     return current_views / channel_average
 
 def create_performance_chart(benchmark_data, video_data, video_title):
-    """Create a performance comparison chart for views"""
+    """Create a performance comparison chart"""
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=benchmark_data['day'], 
@@ -351,7 +350,7 @@ def create_performance_chart(benchmark_data, video_data, video_title):
         mode='lines'
     ))
     fig.update_layout(
-        title='Video Performance Comparison (Views)',
+        title='Video Performance Comparison',
         xaxis_title='Days Since Upload',
         yaxis_title='Cumulative Views',
         height=500,
@@ -377,6 +376,8 @@ def simulate_video_performance(video_data, benchmark_data):
         days_since_publish = 0
     
     current_views = video_data['viewCount']
+    is_short = video_data['isShort']
+    
     if days_since_publish < 2:
         days_since_publish = 2
     
@@ -404,48 +405,6 @@ def simulate_video_performance(video_data, benchmark_data):
         })
     
     return pd.DataFrame(data)
-
-# ------------------------
-# Subscriber Growth Simulation Functions
-# ------------------------
-def simulate_subscriber_growth(video_age, total_subscribers_gained):
-    """Simulate daily subscriber gains from a video over its lifetime"""
-    data = []
-    k = 3.0  # logistic growth rate parameter
-    # Use a logistic function that starts near 0 and saturates at total_subscribers_gained
-    for day in range(video_age + 1):
-        if video_age > 0:
-            cumulative = total_subscribers_gained / (1 + np.exp(-k * ((day / video_age) - 0.5)))
-        else:
-            cumulative = total_subscribers_gained
-        if day == 0:
-            daily = cumulative
-        else:
-            daily = cumulative - data[-1]['cumulative_subscribers']
-        data.append({
-            'day': day,
-            'daily_subscribers': int(round(daily)),
-            'cumulative_subscribers': int(round(cumulative))
-        })
-    return pd.DataFrame(data)
-
-def create_subscriber_chart(subscriber_data):
-    """Create a subscriber growth chart"""
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=subscriber_data['day'],
-        y=subscriber_data['cumulative_subscribers'],
-        name="Cumulative Subscribers Gained",
-        mode='lines+markers'
-    ))
-    fig.update_layout(
-        title='Subscriber Growth Attributable to the Video',
-        xaxis_title='Days Since Video Upload',
-        yaxis_title='Cumulative Subscribers Gained',
-        height=500,
-        plot_bgcolor='white'
-    )
-    return fig
 
 # ------------------------
 # Main App Logic
@@ -488,7 +447,7 @@ with st.sidebar:
     )
 
 st.subheader("Enter YouTube Video URL")
-video_url = st.text_input("Video URL:", placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID or https://www.youtube.com/shorts/VideoID")
+video_url = st.text_input("Video URL:", placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID")
 
 if st.button("Analyze Video", type="primary") and video_url:
     
@@ -506,13 +465,12 @@ if st.button("Analyze Video", type="primary") and video_url:
         published_date = datetime.datetime.fromisoformat(video_details['publishedAt'].replace('Z', '+00:00')).date()
         video_age = (datetime.datetime.now().date() - published_date).days
     
-    with st.spinner("Fetching channel videos and details for benchmark..."):
+    with st.spinner("Fetching channel videos for benchmark..."):
         channel_videos, channel_name, channel_stats = fetch_channel_videos(channel_id, num_videos, yt_api_key)
         if not channel_videos:
             st.error("Failed to fetch channel videos.")
             st.stop()
     
-    # Display Video Information
     st.subheader("Video Information")
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -534,18 +492,7 @@ if st.button("Analyze Video", type="primary") and video_url:
         with metric_cols[2]:
             st.metric("Comments", f"{video_details['commentCount']:,}")
     
-    # Display Channel Information
-    st.subheader("Channel Information")
-    channel_subscribers = int(channel_stats.get('subscriberCount', 0))
-    channel_total_views = int(channel_stats.get('viewCount', 0))
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total Subscribers", f"{channel_subscribers:,}")
-    with col2:
-        st.metric("Total Channel Views", f"{channel_total_views:,}")
-    
-    with st.spinner("Calculating benchmark, outlier and subscriber growth..."):
-        # Determine video type filter for benchmark
+    with st.spinner("Calculating benchmark and outlier score..."):
         if video_type == "auto":
             is_short_filter = video_details['isShort']
             video_type_str = "Shorts" if is_short_filter else "Long-form Videos"
@@ -595,94 +542,80 @@ if st.button("Analyze Video", type="primary") and video_url:
         channel_average = benchmark_stats.loc[day_index, 'channel_average']
         outlier_score = calculate_outlier_score(video_details['viewCount'], channel_average)
         
-        # Create views performance chart
         fig = create_performance_chart(benchmark_stats, video_performance, 
                                       video_details['title'][:40] + "..." if len(video_details['title']) > 40 else video_details['title'])
         st.plotly_chart(fig, use_container_width=True)
         
-        # Subscriber growth simulation
-        conversion_rate = 0.01  # assume 1% of video views result in a subscription from the video page
-        total_subscribers_gained = int(video_details['viewCount'] * conversion_rate)
-        subscriber_df = simulate_subscriber_growth(video_age, total_subscribers_gained)
-        subscriber_fig = create_subscriber_chart(subscriber_df)
-    
-    st.subheader("Outlier Analysis (Views)")
-    if outlier_score >= 2.0:
-        outlier_category = "Significant Positive Outlier"
-        outlier_class = "outlier-high"
-    elif outlier_score >= 1.5:
-        outlier_category = "Positive Outlier"
-        outlier_class = "outlier-high"
-    elif outlier_score >= 1.2:
-        outlier_category = "Slight Positive Outlier"
-        outlier_class = "outlier-normal"
-    elif outlier_score >= 0.8:
-        outlier_category = "Normal Performance"
-        outlier_class = "outlier-normal"
-    elif outlier_score >= 0.5:
-        outlier_category = "Slight Negative Outlier"
-        outlier_class = "outlier-low"
-    else:
-        outlier_category = "Significant Negative Outlier"
-        outlier_class = "outlier-low"
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
+        st.subheader("Outlier Analysis")
+        if outlier_score >= 2.0:
+            outlier_category = "Significant Positive Outlier"
+            outlier_class = "outlier-high"
+        elif outlier_score >= 1.5:
+            outlier_category = "Positive Outlier"
+            outlier_class = "outlier-high"
+        elif outlier_score >= 1.2:
+            outlier_category = "Slight Positive Outlier"
+            outlier_class = "outlier-normal"
+        elif outlier_score >= 0.8:
+            outlier_category = "Normal Performance"
+            outlier_class = "outlier-normal"
+        elif outlier_score >= 0.5:
+            outlier_category = "Slight Negative Outlier"
+            outlier_class = "outlier-low"
+        else:
+            outlier_category = "Significant Negative Outlier"
+            outlier_class = "outlier-low"
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div>Current Views</div>
+                <div style='font-size: 24px; font-weight: bold;'>{video_details['viewCount']:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div>Channel Average</div>
+                <div style='font-size: 24px; font-weight: bold;'>{int(channel_average):,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div>Outlier Score</div>
+                <div style='font-size: 24px; font-weight: bold;' class='{outlier_class}'>{outlier_score:.2f}</div>
+                <div>{outlier_category}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
         st.markdown(f"""
-        <div class='metric-card'>
-            <div>Current Views</div>
-            <div style='font-size: 24px; font-weight: bold;'>{video_details['viewCount']:,}</div>
+        <div class='explanation'>
+            <p><strong>What this means:</strong></p>
+            <p>An outlier score of <strong>{outlier_score:.2f}</strong> means this video has <strong>{outlier_score:.2f}x</strong> the views compared to the channel's average at the same age.</p>
+            <ul>
+                <li>1.0 = Exactly average performance</li>
+                <li>&gt;1.0 = Outperforming channel average</li>
+                <li>&lt;1.0 = Underperforming channel average</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <div>Channel Average</div>
-            <div style='font-size: 24px; font-weight: bold;'>{int(channel_average):,}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <div>Outlier Score</div>
-            <div style='font-size: 24px; font-weight: bold;' class='{outlier_class}'>{outlier_score:.2f}</div>
-            <div>{outlier_category}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown(f"""
-    <div class='explanation'>
-        <p><strong>What this means:</strong></p>
-        <p>An outlier score of <strong>{outlier_score:.2f}</strong> means this video has <strong>{outlier_score:.2f}x</strong> the views compared to the channel's average at the same age.</p>
-        <ul>
-            <li>1.0 = Exactly average performance</li>
-            <li>&gt;1.0 = Outperforming channel average</li>
-            <li>&lt;1.0 = Underperforming channel average</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.subheader("Detailed Performance Metrics")
-    col1, col2 = st.columns(2)
-    with col1:
-        if benchmark_median > 0:
-            vs_median_pct = ((video_details['viewCount'] / benchmark_median) - 1) * 100
-            st.metric("Compared to Median", f"{vs_median_pct:+.1f}%")
-        if channel_average > 0:
-            vs_avg_pct = ((video_details['viewCount'] / channel_average) - 1) * 100
-            st.metric("Compared to Channel Average", f"{vs_avg_pct:+.1f}%")
-    with col2:
-        if benchmark_upper > 0:
-            vs_upper_pct = ((video_details['viewCount'] / benchmark_upper) - 1) * 100
-            st.metric("Compared to Upper Band", f"{vs_upper_pct:+.1f}%")
-        if benchmark_lower > 0:
-            vs_lower_pct = ((video_details['viewCount'] / benchmark_lower) - 1) * 100
-            st.metric("Compared to Lower Band", f"{vs_lower_pct:+.1f}%")
-    
-    # Display Subscriber Growth Information
-    st.subheader("Subscriber Growth from Video")
-    st.markdown(f"Assuming a conversion rate of 1%, this video is estimated to have gained **{total_subscribers_gained:,}** subscribers over {video_age} days.")
-    st.plotly_chart(subscriber_fig, use_container_width=True)
-    
-    st.markdown("Below is the day-wise breakdown of estimated subscriber gains:")
-    st.dataframe(subscriber_df)
+        
+        st.subheader("Detailed Performance Metrics")
+        col1, col2 = st.columns(2)
+        with col1:
+            if benchmark_median > 0:
+                vs_median_pct = ((video_details['viewCount'] / benchmark_median) - 1) * 100
+                st.metric("Compared to Median", f"{vs_median_pct:+.1f}%")
+            if channel_average > 0:
+                vs_avg_pct = ((video_details['viewCount'] / channel_average) - 1) * 100
+                st.metric("Compared to Channel Average", f"{vs_avg_pct:+.1f}%")
+        with col2:
+            if benchmark_upper > 0:
+                vs_upper_pct = ((video_details['viewCount'] / benchmark_upper) - 1) * 100
+                st.metric("Compared to Upper Band", f"{vs_upper_pct:+.1f}%")
+            if benchmark_lower > 0:
+                vs_lower_pct = ((video_details['viewCount'] / benchmark_lower) - 1) * 100
+                st.metric("Compared to Lower Band", f"{vs_lower_pct:+.1f}%")
+
