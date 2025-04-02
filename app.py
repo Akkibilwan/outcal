@@ -269,10 +269,10 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
     else:
         k = 10
         trajectory = [total_views * (1 / (1 + np.exp(-k * ((i+1)/days - 0.35)))) for i in range(days)]
-
+    
     scaling_factor = total_views / trajectory[-1] if trajectory[-1] > 0 else 1
     trajectory = [v * scaling_factor for v in trajectory]
-
+    
     noise_factor = 0.05
     for i in range(days):
         noise = np.random.normal(0, noise_factor * total_views)
@@ -281,11 +281,11 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
         else:
             noisy_value = max(trajectory[i-1] + 10, trajectory[i] + noise)
         trajectory[i] = noisy_value
-
+    
     daily_views = [trajectory[0]]
     for i in range(1, days):
         daily_views.append(trajectory[i] - trajectory[i-1])
-
+    
     for day in range(days):
         data.append({
             'videoId': video_id,
@@ -298,66 +298,16 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
 def calculate_benchmark(df, band_percentage):
     """Calculate benchmark statistics based on historical data"""
     lower_q = (100 - band_percentage) / 200
-    upper_q = 1 - lower_q
+    upper_q = 1 - (100 - band_percentage) / 200
     summary = df.groupby('day')['cumulative_views'].agg([
         ('lower_band', lambda x: x.quantile(lower_q)),
         ('upper_band', lambda x: x.quantile(upper_q)),
+        ('median', 'median'),
+        ('mean', 'mean'),
         ('count', 'count')
     ]).reset_index()
     summary['channel_average'] = (summary['lower_band'] + summary['upper_band']) / 2
     return summary
-
-def create_performance_chart(benchmark_data, video_data, video_title):
-    """Create a performance comparison chart"""
-    fig = go.Figure()
-
-    # Shade between lower and upper bands
-    fig.add_trace(go.Scatter(
-        x=benchmark_data['day'],
-        y=benchmark_data['upper_band'],
-        name='Upper Band',
-        line=dict(width=0),
-        mode='lines',
-        showlegend=False
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=benchmark_data['day'],
-        y=benchmark_data['lower_band'],
-        name='Typical Range',
-        fill='tonexty',
-        fillcolor='rgba(173, 216, 230, 0.3)',
-        line=dict(width=0),
-        mode='lines'
-    ))
-
-    # Plot actual video performance
-    actual_data = video_data[video_data['projected'] == False]
-    fig.add_trace(go.Scatter(
-        x=actual_data['day'],
-        y=actual_data['cumulative_views'],
-        name=f'"{video_title}" (Actual)',
-        line=dict(color='#ea4335', width=3),
-        mode='lines'
-    ))
-
-    fig.update_layout(
-        title='Video Performance Comparison',
-        xaxis_title='Days Since Upload',
-        yaxis_title='Cumulative Views',
-        height=500,
-        hovermode='x unified',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        ),
-        plot_bgcolor='white'
-    )
-
-    return fig
 
 def calculate_outlier_score(current_views, channel_average):
     """Calculate outlier score as the ratio of current views to channel average"""
