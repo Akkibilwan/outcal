@@ -1,3 +1,6 @@
+Below is the complete updated code that you can copy and paste directly:
+
+```python
 import streamlit as st
 import requests
 import pandas as pd
@@ -85,12 +88,13 @@ def extract_channel_id(url):
     return None
 
 def extract_video_id(url):
-    """Extract video ID from various YouTube URL formats"""
+    """Extract video ID from various YouTube URL formats, including Shorts"""
     patterns = [
         r'youtube\.com/watch\?v=([^&\s]+)',
         r'youtu\.be/([^?\s]+)',
         r'youtube\.com/embed/([^?\s]+)',
-        r'youtube\.com/v/([^?\s]+)'
+        r'youtube\.com/v/([^?\s]+)',
+        r'youtube\.com/shorts/([^?\s]+)'
     ]
     for pattern in patterns:
         match = re.search(pattern, url)
@@ -302,8 +306,6 @@ def calculate_benchmark(df, band_percentage):
     summary = df.groupby('day')['cumulative_views'].agg([
         ('lower_band', lambda x: x.quantile(lower_q)),
         ('upper_band', lambda x: x.quantile(upper_q)),
-        ('median', 'median'),
-        ('mean', 'mean'),
         ('count', 'count')
     ]).reset_index()
     summary['channel_average'] = (summary['lower_band'] + summary['upper_band']) / 2
@@ -318,13 +320,22 @@ def calculate_outlier_score(current_views, channel_average):
 def create_performance_chart(benchmark_data, video_data, video_title):
     """Create a performance comparison chart"""
     fig = go.Figure()
+    # Add upper band trace
+    fig.add_trace(go.Scatter(
+        x=benchmark_data['day'], 
+        y=benchmark_data['upper_band'],
+        name='Upper Band',
+        line=dict(color='rgba(173, 216, 230, 0.6)', width=1),
+        mode='lines'
+    ))
+    # Add lower band trace and fill the area between lower and upper bands
     fig.add_trace(go.Scatter(
         x=benchmark_data['day'], 
         y=benchmark_data['lower_band'],
-        name='Typical Performance Range',
+        name='Lower Band',
         fill='tonexty',
         fillcolor='rgba(173, 216, 230, 0.3)',
-        line=dict(width=0),
+        line=dict(color='rgba(173, 216, 230, 0.6)', width=1),
         mode='lines'
     ))
     fig.add_trace(go.Scatter(
@@ -332,13 +343,6 @@ def create_performance_chart(benchmark_data, video_data, video_title):
         y=benchmark_data['channel_average'],
         name='Channel Average',
         line=dict(color='#4285f4', width=2, dash='dash'),
-        mode='lines'
-    ))
-    fig.add_trace(go.Scatter(
-        x=benchmark_data['day'], 
-        y=benchmark_data['median'],
-        name='Channel Median',
-        line=dict(color='#34a853', width=2, dash='dot'),
         mode='lines'
     ))
     actual_data = video_data[video_data['projected'] == False]
@@ -367,7 +371,7 @@ def create_performance_chart(benchmark_data, video_data, video_title):
     return fig
 
 def simulate_video_performance(video_data, benchmark_data):
-    """Simulate video performance based on its actual views"""
+    """Simulate video performance based on its actual views using channel average"""
     try:
         published_at = datetime.datetime.fromisoformat(video_data['publishedAt'].replace('Z', '+00:00')).date()
         current_date = datetime.datetime.now().date()
@@ -376,8 +380,6 @@ def simulate_video_performance(video_data, benchmark_data):
         days_since_publish = 0
     
     current_views = video_data['viewCount']
-    is_short = video_data['isShort']
-    
     if days_since_publish < 2:
         days_since_publish = 2
     
@@ -390,7 +392,7 @@ def simulate_video_performance(video_data, benchmark_data):
         if day == days_since_publish:
             cumulative_views = current_views
         else:
-            ratio = benchmark_data.loc[day, 'median'] / benchmark_data.loc[benchmark_day_index, 'median'] if benchmark_data.loc[benchmark_day_index, 'median'] > 0 else 0
+            ratio = benchmark_data.loc[day, 'channel_average'] / benchmark_data.loc[benchmark_day_index, 'channel_average'] if benchmark_data.loc[benchmark_day_index, 'channel_average'] > 0 else 0
             cumulative_views = int(current_views * ratio)
         if day == 0:
             daily_views = cumulative_views
@@ -447,7 +449,7 @@ with st.sidebar:
     )
 
 st.subheader("Enter YouTube Video URL")
-video_url = st.text_input("Video URL:", placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID")
+video_url = st.text_input("Video URL:", placeholder="https://www.youtube.com/watch?v=VideoID or https://youtu.be/VideoID or https://www.youtube.com/shorts/VideoID")
 
 if st.button("Analyze Video", type="primary") and video_url:
     
@@ -536,7 +538,6 @@ if st.button("Analyze Video", type="primary") and video_url:
         day_index = min(video_age, len(benchmark_stats) - 1)
         if day_index < 0:
             day_index = 0
-        benchmark_median = benchmark_stats.loc[day_index, 'median']
         benchmark_lower = benchmark_stats.loc[day_index, 'lower_band']
         benchmark_upper = benchmark_stats.loc[day_index, 'upper_band']
         channel_average = benchmark_stats.loc[day_index, 'channel_average']
@@ -590,6 +591,20 @@ if st.button("Analyze Video", type="primary") and video_url:
             </div>
             """, unsafe_allow_html=True)
         
+        st.subheader("Detailed Performance Metrics")
+        col1, col2 = st.columns(2)
+        with col1:
+            if channel_average > 0:
+                vs_avg_pct = ((video_details['viewCount'] / channel_average) - 1) * 100
+                st.metric("Compared to Channel Average", f"{vs_avg_pct:+.1f}%")
+        with col2:
+            if benchmark_upper > 0:
+                vs_upper_pct = ((video_details['viewCount'] / benchmark_upper) - 1) * 100
+                st.metric("Compared to Upper Band", f"{vs_upper_pct:+.1f}%")
+            if benchmark_lower > 0:
+                vs_lower_pct = ((video_details['viewCount'] / benchmark_lower) - 1) * 100
+                st.metric("Compared to Lower Band", f"{vs_lower_pct:+.1f}%")
+        
         st.markdown(f"""
         <div class='explanation'>
             <p><strong>What this means:</strong></p>
@@ -601,21 +616,6 @@ if st.button("Analyze Video", type="primary") and video_url:
             </ul>
         </div>
         """, unsafe_allow_html=True)
-        
-        st.subheader("Detailed Performance Metrics")
-        col1, col2 = st.columns(2)
-        with col1:
-            if benchmark_median > 0:
-                vs_median_pct = ((video_details['viewCount'] / benchmark_median) - 1) * 100
-                st.metric("Compared to Median", f"{vs_median_pct:+.1f}%")
-            if channel_average > 0:
-                vs_avg_pct = ((video_details['viewCount'] / channel_average) - 1) * 100
-                st.metric("Compared to Channel Average", f"{vs_avg_pct:+.1f}%")
-        with col2:
-            if benchmark_upper > 0:
-                vs_upper_pct = ((video_details['viewCount'] / benchmark_upper) - 1) * 100
-                st.metric("Compared to Upper Band", f"{vs_upper_pct:+.1f}%")
-            if benchmark_lower > 0:
-                vs_lower_pct = ((video_details['viewCount'] / benchmark_lower) - 1) * 100
-                st.metric("Compared to Lower Band", f"{vs_lower_pct:+.1f}%")
+``` 
 
+This version removes mean and median calculations and displays both the lower and upper band views in the performance chart as requested.
