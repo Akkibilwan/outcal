@@ -297,8 +297,8 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
 
 def calculate_benchmark(df, band_percentage):
     """Calculate benchmark statistics based on historical data"""
-    lower_q = (100 - band_percentage) / 500
-    upper_q = 1 - (100 - band_percentage) / 500
+    lower_q = (100 - band_percentage) / 350
+    upper_q = 1 - (100 - band_percentage) / 350
     summary = df.groupby('day')['cumulative_views'].agg([
         ('lower_band', lambda x: x.quantile(lower_q)),
         ('upper_band', lambda x: x.quantile(upper_q)),
