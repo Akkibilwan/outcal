@@ -313,8 +313,8 @@ def generate_view_trajectory(video_id, days, total_views, is_short):
 
 def calculate_benchmark(df, band_percentage):
     """Calculate lower_band, upper_band, and channel_average from historical data"""
-    lower_q = (100 - band_percentage) / 200   # e.g., if 50% => 25th percentile
-    upper_q = 1 - (100 - band_percentage) / 200  # e.g., if 50% => 75th percentile
+    lower_q = (100 - band_percentage) / 150   # e.g., if 50% => 25th percentile
+    upper_q = 1 - (100 - band_percentage) / 150  # e.g., if 50% => 75th percentile
     
     summary = df.groupby('day')['cumulative_views'].agg([
         ('lower_band', lambda x: x.quantile(lower_q)),
